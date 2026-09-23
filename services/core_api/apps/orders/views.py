@@ -1,3 +1,4 @@
+from apps.common import idempotency
 from apps.orders.models import Order
 from apps.orders.serializers import OrderCreateSerializer, OrderSerializer
 from apps.orders.services import cancel_order, mark_order_paid
@@ -5,6 +6,8 @@ from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+
+_IDEMPOTENCY_SCOPE = "order-create"
 
 
 class OrderViewSet(
@@ -32,6 +35,40 @@ class OrderViewSet(
         return OrderSerializer
 
     def create(self, request, *args, **kwargs):
+        idempotency_key = request.headers.get("Idempotency-Key")
+        if not idempotency_key:
+            return self._create_order(request)
+
+        outcome, payload = idempotency.begin(_IDEMPOTENCY_SCOPE, request.user.id, idempotency_key)
+        if outcome == "in_progress":
+            return Response(
+                {
+                    "error": {
+                        "detail": "A request with this Idempotency-Key is still being processed.",
+                        "code": "IdempotencyKeyInProgress",
+                    }
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        if outcome == "replay":
+            return Response(payload["body"], status=payload["status_code"])
+
+        try:
+            response = self._create_order(request)
+        except Exception:
+            idempotency.abandon(_IDEMPOTENCY_SCOPE, request.user.id, idempotency_key)
+            raise
+
+        idempotency.complete(
+            _IDEMPOTENCY_SCOPE,
+            request.user.id,
+            idempotency_key,
+            response.status_code,
+            response.data,
+        )
+        return response
+
+    def _create_order(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         order = serializer.save()

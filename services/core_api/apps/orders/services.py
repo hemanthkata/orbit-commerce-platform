@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from apps.catalog.models import Product
+from apps.common.exceptions import DomainError
 from apps.common.kafka import publish_event
 from apps.inventory.services import release_stock, reserve_stock
 from apps.orders.models import Order, OrderItem
@@ -65,8 +66,21 @@ def mark_order_paid(order: Order) -> Order:
 
 @transaction.atomic
 def cancel_order(order: Order) -> Order:
-    if order.status in (Order.Status.CANCELLED, Order.Status.DELIVERED):
-        return order
+    """Only a PENDING order can be cancelled through this path: it's the
+    only state where "cancel" means "release the stock reservation and
+    nothing else." Once `mark_order_paid` has run, `commit_stock` has
+    already permanently deducted on-hand quantity - releasing a
+    (now-zeroed) reservation on top of that would flip the order to
+    CANCELLED while silently leaving inventory understated, with no refund
+    or restock actually issued. A paid/shipped order needs a real refund
+    workflow, which is out of scope here, so we fail loudly instead of
+    corrupting stock.
+    """
+    if order.status != Order.Status.PENDING:
+        raise DomainError(
+            f"Cannot cancel an order in '{order.status}' status; only pending "
+            "(unpaid) orders can be cancelled this way."
+        )
 
     for item in order.items.all():
         release_stock(item.product_id, item.quantity)

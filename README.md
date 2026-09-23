@@ -37,6 +37,7 @@ plan which piece of a monolith is safe to extract next in a real system.
 |---|---|
 | Django, DRF, FastAPI | `services/core_api` (Django/DRF), `services/notification_service` (FastAPI) |
 | PostgreSQL / MySQL, schema design, query optimization, locking | `apps/inventory/services.py` (`select_for_update` stock reservation), swap `DATABASE_URL` for MySQL - `mysqlclient` is already in `requirements/base.txt` |
+| Reliable concurrent read/write handling | Row-locked stock reservation (above) + `apps/common/idempotency.py` (Idempotency-Key support on `POST /orders/`, safe against retried/duplicate requests) |
 | Redis caching | `django-redis` cache backend, cached product listing (`apps/catalog/views.py`) |
 | Celery + Celery Beat | `apps/orders/tasks.py` (async email + WS broadcast), daily sales report on a Beat schedule (`seed_beat_schedule` management command) |
 | Kafka, cross-service messaging | `apps/common/kafka.py` (producer in core_api) → `app/kafka/consumer.py` (aiokafka consumer in notification_service) |
@@ -45,7 +46,7 @@ plan which piece of a monolith is safe to extract next in a real system.
 | Gunicorn/Uvicorn + Nginx | `services/core_api/Dockerfile` (gunicorn + uvicorn worker), `infra/nginx/nginx.conf` |
 | Docker / Kubernetes | `docker-compose.yml`, `infra/k8s/` |
 | Swagger/OpenAPI | `drf-spectacular` at `/api/docs/`; FastAPI's built-in OpenAPI at `/docs` |
-| ELK / Grafana / Sentry | `infra/monitoring/` (Filebeat, Logstash, sample dashboard), Sentry SDK init in both services |
+| ELK / Grafana / Sentry | `infra/monitoring/` (Filebeat, Logstash, sample dashboard backed by `django-prometheus`'s `/metrics` endpoint), Sentry SDK init in both services |
 | JWT + OAuth2 | `djangorestframework-simplejwt` + `django-oauth-toolkit`, both wired as DRF auth classes |
 | Unit/integration tests, pre-commit, SonarQube | `services/core_api/tests`, `services/notification_service/tests`, `.pre-commit-config.yaml`, `sonar-project.properties` |
 | Git / Agile | `.github/workflows/ci.yml`, conventional-ish commit history |
@@ -90,6 +91,10 @@ email task, publishes a Kafka `order.created` event, and pushes the update
 over `ws://localhost:8000/ws/orders/` (Channels) - `notification_service`
 picks up the same Kafka event and re-serves it over
 `ws://localhost:8001/ws/notifications/<your-user-id>`.
+
+Send an `Idempotency-Key: <any-unique-string>` header on that `POST` and a
+retried request with the same key returns the original order instead of
+placing a second one - see `apps/common/idempotency.py`.
 
 ## Tests
 

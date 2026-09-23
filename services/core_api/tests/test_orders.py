@@ -1,8 +1,9 @@
 import pytest
-from apps.common.exceptions import InsufficientStockError
+from apps.common.exceptions import DomainError, InsufficientStockError
 from apps.inventory.models import StockItem
 from apps.orders.models import Order
 from apps.orders.services import cancel_order, mark_order_paid, place_order, reserve_stock
+from django.core.cache import cache
 from django.urls import reverse
 from tests.factories import ProductFactory
 
@@ -92,3 +93,60 @@ def test_customer_cannot_see_others_orders(auth_client, user):
 
     assert response.status_code == 200
     assert response.data["results"] == []
+
+
+def test_cannot_cancel_a_paid_order(user):
+    product = ProductFactory(price="10.00", stock=5)
+    order = place_order(customer=user, items=[{"product_id": product.id, "quantity": 2}])
+    mark_order_paid(order)
+
+    with pytest.raises(DomainError):
+        cancel_order(order)
+
+    # and stock must be untouched by the failed cancel attempt
+    stock = StockItem.objects.get(product=product)
+    assert stock.quantity == 3
+    assert stock.reserved_quantity == 0
+
+
+def test_cancel_paid_order_via_api_returns_400(auth_client, user):
+    product = ProductFactory(price="10.00", stock=5)
+    order = place_order(customer=user, items=[{"product_id": product.id, "quantity": 1}])
+    mark_order_paid(order)
+
+    response = auth_client.post(reverse("order-cancel", args=[order.id]))
+
+    assert response.status_code == 400
+    assert response.data["error"]["code"] == "DomainError"
+
+
+def test_repeated_idempotency_key_returns_original_order_without_double_reserving(
+    auth_client, user
+):
+    cache.clear()
+    product = ProductFactory(price="10.00", stock=5)
+    payload = {"items": [{"product_id": str(product.id), "quantity": 2}]}
+    headers = {"HTTP_IDEMPOTENCY_KEY": "retry-abc-123"}
+
+    first = auth_client.post(reverse("order-list"), payload, format="json", **headers)
+    second = auth_client.post(reverse("order-list"), payload, format="json", **headers)
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.data["id"] == second.data["id"]
+
+    # only one order/reservation was actually created
+    assert Order.objects.filter(customer=user).count() == 1
+    stock = StockItem.objects.get(product=product)
+    assert stock.reserved_quantity == 2
+
+
+def test_idempotency_key_in_progress_is_rejected_with_409(user):
+    from apps.common import idempotency
+
+    cache.clear()
+    outcome, _ = idempotency.begin("order-create", user.id, "concurrent-key")
+    assert outcome == "proceed"
+
+    outcome, _ = idempotency.begin("order-create", user.id, "concurrent-key")
+    assert outcome == "in_progress"

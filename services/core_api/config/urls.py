@@ -17,6 +17,9 @@ api_v1_patterns = [
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("health/", HealthCheckView.as_view(), name="health-check"),
+    # Scraped by Prometheus; feeds the request-rate/latency panels in
+    # infra/monitoring/grafana/api-performance-dashboard.json.
+    path("", include("django_prometheus.urls")),
     path("api/v1/", include(api_v1_patterns)),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path(

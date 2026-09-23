@@ -114,9 +114,12 @@ revocable tokens without sharing user credentials.
   correlation id (`apps.common.middleware.RequestLoggingMiddleware`), shipped
   by Filebeat → Logstash → Elasticsearch (`infra/monitoring/`).
 - Sentry for exception + trace capture in both services.
-- A sample Grafana dashboard (`infra/monitoring/grafana/`) assuming a
-  Prometheus scrape of gunicorn/uvicorn + Celery queue depth, plus
-  Elasticsearch-backed panels for error rate and low-stock alerts.
+- `django-prometheus` exposes request-count/latency histograms at
+  `core_api`'s `/metrics` endpoint (see `config/settings/base.py` and
+  `config/urls.py`) - the Prometheus datasource the sample Grafana
+  dashboard (`infra/monitoring/grafana/`) scrapes for its request-rate and
+  p95-latency panels, alongside Elasticsearch-backed panels for error rate
+  and low-stock alerts.
 
 ## What's out of scope on purpose
 
