@@ -1,0 +1,60 @@
+{
+  "title": "Orbit - API Performance",
+  "description": "Sample Grafana dashboard definition. Assumes a Prometheus datasource scraping gunicorn/uvicorn + django-prometheus metrics, and an Elasticsearch datasource fed by infra/monitoring/logstash.conf for the log-derived panels.",
+  "schemaVersion": 39,
+  "timezone": "utc",
+  "refresh": "30s",
+  "time": {"from": "now-6h", "to": "now"},
+  "panels": [
+    {
+      "id": 1,
+      "title": "Requests per second (core-api)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "sum(rate(django_http_requests_total_by_view_transport_method_total[5m]))"}
+      ]
+    },
+    {
+      "id": 2,
+      "title": "p95 latency by endpoint",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum(rate(django_http_requests_latency_seconds_by_view_method_bucket[5m])) by (le, view))"}
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Celery queue depth",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": "Prometheus",
+      "targets": [
+        {"expr": "celery_queue_length{queue=\"celery\"}"}
+      ]
+    },
+    {
+      "id": 4,
+      "title": "5xx error rate",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": "Elasticsearch",
+      "targets": [
+        {"query": "status_code:[500 TO 599]", "metrics": [{"type": "count"}]}
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Low-stock alerts (last 24h)",
+      "type": "stat",
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 16},
+      "datasource": "Elasticsearch",
+      "targets": [
+        {"query": "event_type:\"stock.reserved\" AND below_reorder_threshold:true", "metrics": [{"type": "count"}]}
+      ]
+    }
+  ]
+}

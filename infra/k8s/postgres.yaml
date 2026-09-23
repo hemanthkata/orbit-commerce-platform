@@ -1,0 +1,52 @@
+# Single-instance Postgres for local/demo clusters (kind, minikube). A real
+# deployment would point DATABASE_URL at a managed instance (RDS/Cloud SQL)
+# instead of running the database inside Kubernetes.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: orbit
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: orbit
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: postgres}
+  template:
+    metadata:
+      labels: {app: postgres}
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports: [{containerPort: 5432}]
+          env:
+            - {name: POSTGRES_USER, value: "orbit"}
+            - {name: POSTGRES_PASSWORD, value: "orbit"}
+            - {name: POSTGRES_DB, value: "orbit"}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+          readinessProbe:
+            exec: {command: ["pg_isready", "-U", "orbit"]}
+            initialDelaySeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: postgres-data}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: orbit
+spec:
+  selector: {app: postgres}
+  ports: [{port: 5432, targetPort: 5432}]

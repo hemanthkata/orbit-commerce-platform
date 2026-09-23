@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: core-api
+  namespace: orbit
+  labels: {app: core-api}
+spec:
+  replicas: 3
+  selector:
+    matchLabels: {app: core-api}
+  template:
+    metadata:
+      labels: {app: core-api}
+    spec:
+      initContainers:
+        - name: migrate
+          image: orbit/core-api:latest
+          command: ["python", "manage.py", "migrate", "--noinput"]
+          envFrom:
+            - {configMapRef: {name: orbit-config}}
+            - {secretRef: {name: orbit-secrets}}
+      containers:
+        - name: core-api
+          image: orbit/core-api:latest
+          ports: [{containerPort: 8000}]
+          envFrom:
+            - {configMapRef: {name: orbit-config}}
+            - {secretRef: {name: orbit-secrets}}
+          readinessProbe:
+            httpGet: {path: /health/, port: 8000}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health/, port: 8000}
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests: {cpu: "250m", memory: "256Mi"}
+            limits: {cpu: "1", memory: "512Mi"}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: core-api
+  namespace: orbit
+spec:
+  selector: {app: core-api}
+  ports: [{port: 8000, targetPort: 8000}]
